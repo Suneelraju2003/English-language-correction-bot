@@ -1,162 +1,159 @@
-from telegram import (
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup
-)
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    CallbackQueryHandler,
-    MessageHandler,
-    ContextTypes,
-    filters
-)
+import streamlit as st
 import torch
 from transformers import (
-    T5Tokenizer,
-    T5ForConditionalGeneration,
-    AutoTokenizer,
-    AutoModelForSeq2SeqLM
+    T5Tokenizer, T5ForConditionalGeneration,
+    AutoTokenizer, AutoModelForSeq2SeqLM
+)
+from datetime import datetime
+
+# ===============================
+# Page Config
+# ===============================
+st.set_page_config(
+    page_title="English AI Chatbot",
+    page_icon="🧠",
+    layout="centered"
 )
 
-# =========================
-# Load Models (once)
-# =========================
-GRAMMAR_MODEL = "vennify/t5-base-grammar-correction"
-HI_MODEL = "Helsinki-NLP/opus-mt-en-hi"
-TE_MODEL = "ai4bharat/indictrans2-en-indic-1B"
+# ===============================
+# Load Models (cached)
+# ===============================
+@st.cache_resource
+def load_models():
+    # Grammar correction
+    g_model_name = "vennify/t5-base-grammar-correction"
+    g_tokenizer = T5Tokenizer.from_pretrained(g_model_name)
+    g_model = T5ForConditionalGeneration.from_pretrained(g_model_name)
 
-grammar_tokenizer = T5Tokenizer.from_pretrained(GRAMMAR_MODEL)
-grammar_model = T5ForConditionalGeneration.from_pretrained(GRAMMAR_MODEL)
+    # English → Hindi
+    hi_model_name = "Helsinki-NLP/opus-mt-en-hi"
+    hi_tokenizer = AutoTokenizer.from_pretrained(hi_model_name)
+    hi_model = AutoModelForSeq2SeqLM.from_pretrained(hi_model_name)
 
-hi_tokenizer = AutoTokenizer.from_pretrained(HI_MODEL)
-hi_model = AutoModelForSeq2SeqLM.from_pretrained(HI_MODEL)
+    # English → Telugu
+    te_model_name = "ai4bharat/indictrans2-en-indic-1B"
+    te_tokenizer = AutoTokenizer.from_pretrained(te_model_name, trust_remote_code=True)
+    te_model = AutoModelForSeq2SeqLM.from_pretrained(te_model_name, trust_remote_code=True)
 
-te_tokenizer = AutoTokenizer.from_pretrained(TE_MODEL, trust_remote_code=True)
-te_model = AutoModelForSeq2SeqLM.from_pretrained(TE_MODEL, trust_remote_code=True)
+    return g_tokenizer, g_model, hi_tokenizer, hi_model, te_tokenizer, te_model
 
-# =========================
-# Helper Functions
-# =========================
+(
+    grammar_tokenizer,
+    grammar_model,
+    hi_tokenizer,
+    hi_model,
+    te_tokenizer,
+    te_model
+) = load_models()
+
+# ===============================
+# Functions
+# ===============================
 def correct_grammar(text):
-    text = "grammar: " + text
-    ids = grammar_tokenizer.encode(text, return_tensors="pt", truncation=True)
+    inp = "grammar: " + text
+    ids = grammar_tokenizer.encode(inp, return_tensors="pt", truncation=True)
     out = grammar_model.generate(ids, max_length=256)
     return grammar_tokenizer.decode(out[0], skip_special_tokens=True)
 
-def translate_hindi(text):
+def translate_hi(text):
     ids = hi_tokenizer(text, return_tensors="pt", truncation=True)
     out = hi_model.generate(**ids, max_length=256)
     return hi_tokenizer.decode(out[0], skip_special_tokens=True)
 
-def translate_telugu(text):
+def translate_te(text):
     text = "<2te> " + text
     ids = te_tokenizer(text, return_tensors="pt", truncation=True)
     out = te_model.generate(**ids, max_length=256)
     return te_tokenizer.decode(out[0], skip_special_tokens=True)
 
-# =========================
-# /start Command
-# =========================
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data.clear()
-    context.user_data["options"] = set()
+# ===============================
+# Session State
+# ===============================
+if "started" not in st.session_state:
+    st.session_state.started = False
 
-    keyboard = [
-        [InlineKeyboardButton("✅ Grammar Correction", callback_data="grammar")],
-        [InlineKeyboardButton("🌐 English → Hindi", callback_data="hi")],
-        [InlineKeyboardButton("🌐 English → Telugu", callback_data="te")],
-        [InlineKeyboardButton("▶ RUN", callback_data="run")]
-    ]
+if "chat" not in st.session_state:
+    st.session_state.chat = []
 
-    await update.message.reply_text(
-        "🧠 *English Correction Bot*\n\n"
-        "STEP 1️⃣ Select one or more options\n"
-        "STEP 2️⃣ Click ▶ RUN\n"
-        "STEP 3️⃣ Send your English sentence",
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+# ===============================
+# UI – Header
+# ===============================
+st.title("🧠 English AI Chatbot")
+st.caption("Grammar • Vocabulary • Translation • Chat-based")
 
-# =========================
-# Button Handler
-# =========================
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
+# ===============================
+# START / STOP CONTROLS
+# ===============================
+col1, col2, col3 = st.columns(3)
 
-    options = context.user_data.get("options", set())
-    choice = query.data
+with col1:
+    if st.button("▶ START CHAT"):
+        st.session_state.started = True
+        st.session_state.chat = []
 
-    if choice == "run":
-        if not options:
-            await query.edit_message_text("⚠️ Please select at least one option.")
-            return
+with col2:
+    if st.button("⏹ STOP CHAT"):
+        st.session_state.started = False
 
-        context.user_data["ready"] = True
-        await query.edit_message_text(
-            "✍️ *Now send your English sentence*",
-            parse_mode="Markdown"
+with col3:
+    if st.session_state.chat:
+        chat_text = "\n\n".join(st.session_state.chat)
+        st.download_button(
+            "⬇ DOWNLOAD CHAT",
+            chat_text,
+            file_name=f"english_chat_{datetime.now().strftime('%Y%m%d_%H%M')}.txt"
         )
-        return
 
-    options.add(choice)
-    context.user_data["options"] = options
+# ===============================
+# OPTIONS (only if started)
+# ===============================
+if st.session_state.started:
+    st.subheader("⚙ Select Options")
 
-    selected = "\n".join(f"• {o}" for o in options)
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        opt_grammar = st.checkbox("Grammar & Tense")
+    with col2:
+        opt_hi = st.checkbox("English → Hindi")
+    with col3:
+        opt_te = st.checkbox("English → Telugu")
 
-    await query.edit_message_text(
-        "🧠 *English Correction Bot*\n\n"
-        "STEP 1️⃣ Select options\n"
-        "STEP 2️⃣ Click ▶ RUN\n"
-        "STEP 3️⃣ Send sentence\n\n"
-        "✅ *Selected options:*\n"
-        f"{selected}",
-        parse_mode="Markdown",
-        reply_markup=query.message.reply_markup
-    )
+    st.divider()
 
-# =========================
-# Text Handler
-# =========================
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.user_data.get("ready"):
-        await update.message.reply_text("⚠️ Use /start and select options first.")
-        return
+    # ===============================
+    # CHAT DISPLAY
+    # ===============================
+    for msg in st.session_state.chat:
+        st.markdown(msg)
 
-    text = update.message.text
-    options = context.user_data["options"]
+    # ===============================
+    # CHAT INPUT
+    # ===============================
+    user_input = st.chat_input("Type your English sentence here...")
 
-    result = f"❌ Original:\n{text}\n\n"
-    corrected = text
+    if user_input:
+        st.session_state.chat.append(f"👤 **You:** {user_input}")
 
-    if "grammar" in options:
-        corrected = correct_grammar(text)
-        result += f"✅ Corrected:\n{corrected}\n\n"
+        response = ""
 
-    if "hi" in options:
-        result += f"🇮🇳 Hindi:\n{translate_hindi(corrected)}\n\n"
+        corrected = user_input
+        if opt_grammar:
+            corrected = correct_grammar(user_input)
+            response += f"✅ **Corrected English:**\n{corrected}\n\n"
 
-    if "te" in options:
-        result += f"🇮🇳 Telugu:\n{translate_telugu(corrected)}\n\n"
+        if opt_hi:
+            response += f"🇮🇳 **Hindi:**\n{translate_hi(corrected)}\n\n"
 
-    await update.message.reply_text(result)
-    context.user_data.clear()
+        if opt_te:
+            response += f"🇮🇳 **Telugu:**\n{translate_te(corrected)}\n\n"
 
-# =========================
-# Main
-# =========================
-def main():
-    BOT_TOKEN = "8500153960:AAFJre6HR8kguZ5XA5ALP1E2UoSaxmQKZKM"
+        if response == "":
+            response = "⚠ Please select at least one option."
 
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+        st.session_state.chat.append(f"🤖 **Bot:**\n{response}")
+        st.rerun()
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(button_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+else:
+    st.info("Click **START CHAT** to begin.")
 
-    print("🤖 Bot is running...")
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
+st.caption("100% Free • Open Source • Runs on Streamlit")
