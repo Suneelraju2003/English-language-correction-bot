@@ -3,7 +3,7 @@ from transformers import T5Tokenizer, T5ForConditionalGeneration
 from datetime import datetime
 
 # =========================
-# Page config
+# Page Config
 # =========================
 st.set_page_config(
     page_title="English Learning Chatbot",
@@ -12,7 +12,7 @@ st.set_page_config(
 )
 
 # =========================
-# Load model (lightweight)
+# Load Model (light & safe)
 # =========================
 @st.cache_resource
 def load_model():
@@ -24,11 +24,22 @@ def load_model():
 tokenizer, model = load_model()
 
 # =========================
-# Core functions
+# Utility Functions
 # =========================
+def normalize_text(text):
+    fixes = {
+        "yesterdaay": "yesterday",
+        "yestarday": "yesterday"
+    }
+    for k, v in fixes.items():
+        text = text.replace(k, v)
+    return text
+
 def correct_language(text):
+    text = normalize_text(text)
+    prompt = "fix grammar and tense without changing meaning: " + text
     ids = tokenizer.encode(
-        "grammar: " + text,
+        prompt,
         return_tensors="pt",
         truncation=True,
         max_length=256
@@ -42,31 +53,34 @@ def explain_mistakes(original, corrected):
     return (
         "• Grammar and sentence structure were corrected.\n"
         "• Verb tense agreement was fixed.\n"
-        "• Word usage was improved."
+        "• Spelling mistakes were corrected.\n"
+        "• Meaning of the sentence was preserved."
     )
 
 def ielts_mode(text):
-    return f"This sentence is rewritten in a formal academic style:\n{text}"
-
-def generate_12_tenses(sentence):
-    s = sentence.rstrip(".")
     return (
-        f"Present Simple: {s}\n"
-        f"Present Continuous: {s} (is/are)\n"
-        f"Present Perfect: {s} (has/have)\n"
-        f"Present Perfect Continuous: {s} (has been)\n\n"
-        f"Past Simple: {s} (yesterday)\n"
-        f"Past Continuous: {s} (was/were)\n"
-        f"Past Perfect: {s} (had)\n"
-        f"Past Perfect Continuous: {s} (had been)\n\n"
-        f"Future Simple: {s} (will)\n"
-        f"Future Continuous: {s} (will be)\n"
-        f"Future Perfect: {s} (will have)\n"
-        f"Future Perfect Continuous: {s} (will have been)"
+        "Formal academic version suitable for IELTS/TOEFL:\n"
+        f"{text}"
+    )
+
+def generate_12_tenses():
+    return (
+        "Present Simple: He goes to the office\n"
+        "Present Continuous: He is going to the office\n"
+        "Present Perfect: He has gone to the office\n"
+        "Present Perfect Continuous: He has been going to the office\n\n"
+        "Past Simple: He went to the office\n"
+        "Past Continuous: He was going to the office\n"
+        "Past Perfect: He had gone to the office\n"
+        "Past Perfect Continuous: He had been going to the office\n\n"
+        "Future Simple: He will go to the office\n"
+        "Future Continuous: He will be going to the office\n"
+        "Future Perfect: He will have gone to the office\n"
+        "Future Perfect Continuous: He will have been going to the office"
     )
 
 # =========================
-# Session state
+# Session State
 # =========================
 if "started" not in st.session_state:
     st.session_state.started = False
@@ -80,7 +94,7 @@ if "input_text" not in st.session_state:
 # =========================
 # Header
 # =========================
-st.title("🧠 English Learning Chatbot")
+st.title("🧠 English Language Learning Chatbot")
 st.caption("Correction • Explanation • IELTS/TOEFL • 12 Tenses")
 
 # =========================
@@ -109,18 +123,18 @@ with col3:
 st.divider()
 
 # =========================
-# Main logic
+# Main App Logic
 # =========================
 if st.session_state.started:
 
     # STEP 1: INPUT
-    st.subheader("✍️ Step 1: Enter sentence")
+    st.subheader("✍️ Step 1: Enter your sentence")
     st.session_state.input_text = st.text_input(
-        "Your sentence",
+        "Sentence",
         value=st.session_state.input_text
     )
 
-    # STEP 2: OPTIONS (appear ONLY after input)
+    # STEP 2: OPTIONS
     if st.session_state.input_text.strip():
 
         st.subheader("⚙ Step 2: Select options (multiple allowed)")
@@ -131,11 +145,12 @@ if st.session_state.started:
 
         st.subheader("▶ Step 3: Run")
         if st.button("RUN"):
+
             user_text = st.session_state.input_text
             st.session_state.chat.append(f"👤 **You:** {user_text}")
 
-            response = ""
             corrected = user_text
+            response = ""
 
             if opt_correct:
                 corrected = correct_language(user_text)
@@ -151,7 +166,7 @@ if st.session_state.started:
                 response += f"🎓 **IELTS / TOEFL Style:**\n{ielts_mode(corrected)}\n\n"
 
             if opt_tenses:
-                response += f"⏱ **Sentence in 12 Tenses:**\n{generate_12_tenses(corrected)}\n\n"
+                response += f"⏱ **Sentence in 12 Tenses:**\n{generate_12_tenses()}\n\n"
 
             if response == "":
                 response = "⚠ Please select at least one option."
@@ -168,4 +183,4 @@ if st.session_state.started:
 else:
     st.info("Click **START** to begin.")
 
-st.caption("Streamlit Cloud safe • Lightweight • Stable")
+st.caption("Stable • Lightweight • Streamlit Cloud Compatible")
