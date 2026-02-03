@@ -18,17 +18,47 @@ st.set_page_config(
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # =========================
-# GPT Helper
+# GPT – SINGLE CALL ONLY
 # =========================
-def gpt(prompt):
+def gpt_all(text, do_correct, do_explain, do_ielts, do_tenses):
+    tasks = []
+    if do_correct:
+        tasks.append("1. Correct the grammar and tense without changing meaning.")
+    if do_explain:
+        tasks.append("2. Explain the mistakes briefly in bullet points.")
+    if do_ielts:
+        tasks.append("3. Rewrite in formal IELTS/TOEFL academic style.")
+    if do_tenses:
+        tasks.append("4. Rewrite the sentence correctly in all 12 English tenses.")
+
+    if not tasks:
+        return "⚠ Please select at least one option."
+
+    prompt = f"""
+You are an expert English teacher.
+
+Sentence:
+{text}
+
+Tasks:
+{chr(10).join(tasks)}
+
+Rules:
+- Do NOT change the meaning or time reference.
+- Be grammatically correct.
+- For 12 tenses, use proper verb forms (not labels).
+- Keep output clear and structured.
+"""
+
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
-            {"role": "system", "content": "You are an expert English teacher."},
+            {"role": "system", "content": "You are a professional English language instructor."},
             {"role": "user", "content": prompt}
         ],
         temperature=0.2
     )
+
     return response.choices[0].message.content.strip()
 
 # =========================
@@ -47,7 +77,7 @@ if "input_text" not in st.session_state:
 # Header
 # =========================
 st.title("🧠 English GPT Tutor")
-st.caption("Accurate • Meaning-Preserving • Exam-Ready")
+st.caption("Accurate • IELTS Ready • Meaning Preserved • Rate-Limit Safe")
 
 # =========================
 # Controls
@@ -87,7 +117,7 @@ if st.session_state.started:
 
     if st.session_state.input_text.strip():
 
-        st.subheader("⚙ Step 2: Select options")
+        st.subheader("⚙ Step 2: Select options (multiple allowed)")
         opt_correct = st.checkbox("Language Correction")
         opt_explain = st.checkbox("Explain Mistakes")
         opt_ielts = st.checkbox("IELTS / TOEFL Mode")
@@ -98,36 +128,18 @@ if st.session_state.started:
             user_text = st.session_state.input_text
             st.session_state.chat.append(f"👤 **You:** {user_text}")
 
-            output = ""
+            try:
+                result = gpt_all(
+                    user_text,
+                    opt_correct,
+                    opt_explain,
+                    opt_ielts,
+                    opt_tenses
+                )
+            except Exception as e:
+                result = "⚠ API limit reached. Please wait a few seconds and try again."
 
-            if opt_correct:
-                output += "✅ **Corrected English:**\n"
-                output += gpt(
-                    f"Correct the grammar and tense of this sentence without changing its meaning:\n{user_text}"
-                ) + "\n\n"
-
-            if opt_explain:
-                output += "🧠 **Explanation of Mistakes:**\n"
-                output += gpt(
-                    f"Explain the grammar and tense mistakes in simple bullet points:\n{user_text}"
-                ) + "\n\n"
-
-            if opt_ielts:
-                output += "🎓 **IELTS / TOEFL Version:**\n"
-                output += gpt(
-                    f"Rewrite this sentence in a formal academic IELTS/TOEFL style:\n{user_text}"
-                ) + "\n\n"
-
-            if opt_tenses:
-                output += "⏱ **Sentence in 12 Tenses:**\n"
-                output += gpt(
-                    f"Write this sentence correctly in all 12 English tenses:\n{user_text}"
-                ) + "\n\n"
-
-            if not output:
-                output = "⚠ Please select at least one option."
-
-            st.session_state.chat.append(f"🤖 **Bot:**\n{output}")
+            st.session_state.chat.append(f"🤖 **Bot:**\n{result}")
             st.session_state.input_text = ""
             st.rerun()
 
@@ -138,4 +150,4 @@ if st.session_state.started:
 else:
     st.info("Click **START** to begin.")
 
-st.caption("Powered by GPT • Linguistically Correct • Production-Grade")
+st.caption("Single-call GPT • Stable • Cost-efficient")
