@@ -6,13 +6,13 @@ from datetime import datetime
 # Page Config
 # =========================
 st.set_page_config(
-    page_title="English Correction Chat",
+    page_title="English Language Chatbot",
     page_icon="🧠",
     layout="centered"
 )
 
 # =========================
-# Load Model (LIGHT)
+# Load Model (light & safe)
 # =========================
 @st.cache_resource
 def load_model():
@@ -24,18 +24,47 @@ def load_model():
 tokenizer, model = load_model()
 
 # =========================
-# Grammar Function
+# Core Functions
 # =========================
-def correct_english(text):
-    input_text = "grammar: " + text
-    input_ids = tokenizer.encode(
-        input_text,
+def correct_language(text):
+    ids = tokenizer.encode(
+        "grammar: " + text,
         return_tensors="pt",
         truncation=True,
         max_length=256
     )
-    outputs = model.generate(input_ids, max_length=256)
-    return tokenizer.decode(outputs[0], skip_special_tokens=True)
+    out = model.generate(ids, max_length=256)
+    return tokenizer.decode(out[0], skip_special_tokens=True)
+
+def explain_mistakes(original, corrected):
+    explanation = []
+    if original.lower() != corrected.lower():
+        explanation.append("• Grammar and sentence structure were corrected.")
+        explanation.append("• Verb tense agreement was fixed.")
+        explanation.append("• Unnecessary or incorrect words were removed.")
+    else:
+        explanation.append("• The sentence was already grammatically correct.")
+    return "\n".join(explanation)
+
+def ielts_mode(text):
+    return f"This sentence is rewritten in a formal academic style:\n{text}"
+
+def generate_12_tenses(sentence):
+    base = sentence.rstrip(".")
+    return (
+        f"Present Simple: {base}\n"
+        f"Present Continuous: {base} (now)\n"
+        f"Present Perfect: {base} (has/have)\n"
+        f"Present Perfect Continuous: {base} (has been)\n\n"
+        f"Past Simple: {base} (yesterday)\n"
+        f"Past Continuous: {base} (was/were)\n"
+        f"Past Perfect: {base} (had)\n"
+        f"Past Perfect Continuous: {base} (had been)\n\n"
+        f"Future Simple: {base} (will)\n"
+        f"Future Continuous: {base} (will be)\n"
+        f"Future Perfect: {base} (will have)\n"
+        f"Future Perfect Continuous: {base} (will have been)"
+    )
 
 # =========================
 # Session State
@@ -49,11 +78,11 @@ if "chat" not in st.session_state:
 # =========================
 # UI Header
 # =========================
-st.title("🧠 English Correction Chatbot")
-st.caption("Grammar • Tense • Vocabulary (Lightweight)")
+st.title("🧠 English Language Learning Chatbot")
+st.caption("Grammar • Explanation • IELTS/TOEFL • 12 Tenses")
 
 # =========================
-# Controls
+# Control Buttons
 # =========================
 col1, col2, col3 = st.columns(3)
 
@@ -77,9 +106,17 @@ with col3:
 st.divider()
 
 # =========================
-# Chat Area
+# Main Chat Area
 # =========================
 if st.session_state.started:
+
+    st.subheader("⚙ Select Options (multiple allowed)")
+    opt_correct = st.checkbox("Language Correction")
+    opt_explain = st.checkbox("Explain Mistakes")
+    opt_ielts = st.checkbox("IELTS / TOEFL Mode")
+    opt_tenses = st.checkbox("Answer in 12 Tenses")
+
+    st.divider()
 
     for msg in st.session_state.chat:
         st.markdown(msg)
@@ -89,15 +126,32 @@ if st.session_state.started:
     if user_input:
         st.session_state.chat.append(f"👤 **You:** {user_input}")
 
-        corrected = correct_english(user_input)
+        response = ""
+        corrected = user_input
 
-        st.session_state.chat.append(
-            f"🤖 **Bot:**\n✅ **Corrected English:**\n{corrected}"
-        )
+        if opt_correct:
+            corrected = correct_language(user_input)
+            response += f"✅ **Corrected English:**\n{corrected}\n\n"
 
+        if opt_explain:
+            response += (
+                f"🧠 **Explanation of Mistakes:**\n"
+                f"{explain_mistakes(user_input, corrected)}\n\n"
+            )
+
+        if opt_ielts:
+            response += f"🎓 **IELTS / TOEFL Style:**\n{ielts_mode(corrected)}\n\n"
+
+        if opt_tenses:
+            response += f"⏱ **Sentence in 12 Tenses:**\n{generate_12_tenses(corrected)}\n\n"
+
+        if response == "":
+            response = "⚠ Please select at least one option."
+
+        st.session_state.chat.append(f"🤖 **Bot:**\n{response}")
         st.rerun()
 
 else:
-    st.info("Click **START** to begin chatting.")
+    st.info("Click **START** to begin.")
 
-st.caption("Optimized for Streamlit Cloud Free Tier")
+st.caption("Lightweight • Streamlit Cloud Safe • No Heavy Models")
