@@ -1,123 +1,96 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, CallbackQueryHandler, filters
+import streamlit as st
+import torch
 from transformers import (
     T5Tokenizer, T5ForConditionalGeneration,
-    MarianTokenizer, MarianMTModel
+    AutoTokenizer, AutoModelForSeq2SeqLM
 )
-import torch
 
-# =============================
-# Load Models
-# =============================
-GRAMMAR_MODEL = "vennify/t5-base-grammar-correction"
-EN_HI = "Helsinki-NLP/opus-mt-en-hi"
-EN_TE = "Helsinki-NLP/opus-mt-en-te"
+st.set_page_config(page_title="English Correction & Translator", page_icon="🧠")
 
-grammar_tokenizer = T5Tokenizer.from_pretrained(GRAMMAR_MODEL)
-grammar_model = T5ForConditionalGeneration.from_pretrained(GRAMMAR_MODEL)
+# =========================
+# Load Models (Cached)
+# =========================
+@st.cache_resource
+def load_models():
+    # Grammar model
+    grammar_model_name = "vennify/t5-base-grammar-correction"
+    g_tokenizer = T5Tokenizer.from_pretrained(grammar_model_name)
+    g_model = T5ForConditionalGeneration.from_pretrained(grammar_model_name)
 
-hi_tokenizer = MarianTokenizer.from_pretrained(EN_HI)
-hi_model = MarianMTModel.from_pretrained(EN_HI)
+    # English → Hindi
+    hi_model_name = "Helsinki-NLP/opus-mt-en-hi"
+    hi_tokenizer = AutoTokenizer.from_pretrained(hi_model_name)
+    hi_model = AutoModelForSeq2SeqLM.from_pretrained(hi_model_name)
 
-te_tokenizer = MarianTokenizer.from_pretrained(EN_TE)
-te_model = MarianMTModel.from_pretrained(EN_TE)
+    # English → Telugu (IndicTrans2)
+    te_model_name = "ai4bharat/indictrans2-en-indic-1B"
+    te_tokenizer = AutoTokenizer.from_pretrained(te_model_name, trust_remote_code=True)
+    te_model = AutoModelForSeq2SeqLM.from_pretrained(te_model_name, trust_remote_code=True)
 
-# =============================
-# Helper Functions
-# =============================
+    return g_tokenizer, g_model, hi_tokenizer, hi_model, te_tokenizer, te_model
+
+(
+    grammar_tokenizer,
+    grammar_model,
+    hi_tokenizer,
+    hi_model,
+    te_tokenizer,
+    te_model
+) = load_models()
+
+# =========================
+# Functions
+# =========================
 def correct_grammar(text):
-    input_text = "grammar: " + text
-    ids = grammar_tokenizer.encode(input_text, return_tensors="pt", max_length=512, truncation=True)
-    with torch.no_grad():
-        out = grammar_model.generate(ids, max_length=512, num_beams=5)
+    inp = "grammar: " + text
+    ids = grammar_tokenizer.encode(inp, return_tensors="pt", truncation=True)
+    out = grammar_model.generate(ids, max_length=256)
     return grammar_tokenizer.decode(out[0], skip_special_tokens=True)
 
-def translate(text, tokenizer, model):
+def translate(text, tokenizer, model, tgt_lang=None):
+    if tgt_lang:
+        text = f"<2{tgt_lang}> {text}"
     ids = tokenizer(text, return_tensors="pt", truncation=True)
-    with torch.no_grad():
-        out = model.generate(**ids)
+    out = model.generate(**ids, max_length=256)
     return tokenizer.decode(out[0], skip_special_tokens=True)
 
-# =============================
-# Commands
-# =============================
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data.clear()
-    keyboard = [
-        [InlineKeyboardButton("✅ Grammar Correction", callback_data="grammar")],
-        [InlineKeyboardButton("🧠 Improve Vocabulary", callback_data="vocab")],
-        [InlineKeyboardButton("🧑‍🏫 Explain Mistakes", callback_data="explain")],
-        [
-            InlineKeyboardButton("🌐 English → Hindi", callback_data="hi"),
-            InlineKeyboardButton("🌐 English → Telugu", callback_data="te")
-        ],
-        [InlineKeyboardButton("▶️ RUN", callback_data="run")]
+# =========================
+# UI
+# =========================
+st.title("🧠 English Correction & Translation Bot")
+
+options = st.multiselect(
+    "Select operations (multiple allowed):",
+    [
+        "Grammar & Tense Correction",
+        "Improve Vocabulary",
+        "Translate to Hindi",
+        "Translate to Telugu"
     ]
-    await update.message.reply_text(
-        "🧠 English Super Bot\n\n"
-        "1️⃣ Type a sentence\n"
-        "2️⃣ Select options (multiple allowed)\n"
-        "3️⃣ Click RUN",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+)
 
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
+text = st.text_area("✍️ Enter English text")
 
-    choice = query.data
-    selected = context.user_data.get("options", set())
+if st.button("▶ Run"):
+    if not text.strip():
+        st.warning("Please enter text.")
+    else:
+        with st.spinner("Processing..."):
+            corrected = text
 
-    if choice == "run":
-        context.user_data["run"] = True
-        await query.message.reply_text("✍️ Now send your sentence")
-        return
+            if "Grammar & Tense Correction" in options or "Improve Vocabulary" in options:
+                corrected = correct_grammar(text)
+                st.subheader("✅ Corrected English")
+                st.write(corrected)
 
-    selected.add(choice)
-    context.user_data["options"] = selected
-    await query.message.reply_text(f"✔ Selected: {', '.join(selected)}")
+            if "Translate to Hindi" in options:
+                hi = translate(corrected, hi_tokenizer, hi_model)
+                st.subheader("🇮🇳 Hindi")
+                st.write(hi)
 
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
-    options = context.user_data.get("options", set())
+            if "Translate to Telugu" in options:
+                te = translate(corrected, te_tokenizer, te_model, tgt_lang="te")
+                st.subheader("🇮🇳 Telugu")
+                st.write(te)
 
-    if not options:
-        await update.message.reply_text("⚠️ Please select options first using /start")
-        return
-
-    result = f"❌ Original:\n{text}\n\n"
-
-    corrected = text
-    if "grammar" in options or "vocab" in options:
-        corrected = correct_grammar(text)
-        result += f"✅ Corrected:\n{corrected}\n\n"
-
-    if "hi" in options:
-        result += f"🇮🇳 Hindi:\n{translate(corrected, hi_tokenizer, hi_model)}\n\n"
-
-    if "te" in options:
-        result += f"🇮🇳 Telugu:\n{translate(corrected, te_tokenizer, te_model)}\n\n"
-
-    if "explain" in options:
-        result += "🧑‍🏫 Explanation:\nSentence structure, tense, and word usage were corrected."
-
-    await update.message.reply_text(result)
-    context.user_data.clear()
-
-# =============================
-# Main
-# =============================
-def main():
-    BOT_TOKEN = "8500153960:AAFJre6HR8kguZ5XA5ALP1E2UoSaxmQKZKM"
-
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(button_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-
-    print("🤖 Bot running...")
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
+st.caption("100% Free • Open Source • No API Keys")
